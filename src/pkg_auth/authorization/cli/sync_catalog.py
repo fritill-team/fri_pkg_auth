@@ -28,7 +28,10 @@ import os
 import sys
 from typing import Awaitable, Callable, Sequence
 
-from ..application.use_cases.register_permission_catalog import CatalogEntry
+from ..application.use_cases.register_permission_catalog import (
+    CatalogEntry,
+    ServiceManifest,
+)
 from ..application.use_cases.sync_permission_catalog import (
     SyncPermissionCatalogUseCase,
     SyncResult,
@@ -36,6 +39,7 @@ from ..application.use_cases.sync_permission_catalog import (
 from ..domain.ports import PermissionCatalogRepository, ServiceRepository
 
 CatalogLoader = Callable[[str], Sequence[CatalogEntry]]
+ManifestLoader = Callable[[str], ServiceManifest]
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -58,6 +62,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help=(
             "Dotted path to the catalog iterable, e.g. "
             "'courses.domain.permissions:CATALOG'."
+        ),
+    )
+    parser.add_argument(
+        "--service-manifest",
+        default=None,
+        help=(
+            "Optional dotted path to a ServiceManifest the service registers "
+            "for itself, e.g. 'courses.domain.permissions:SERVICE'. Its name "
+            "must match --service; its display_label seeds/updates the "
+            "service's identity row. Vendor flags stay owned by "
+            "pkg-auth-sync-services."
         ),
     )
     parser.add_argument(
@@ -95,6 +110,26 @@ def load_catalog(dotted: str) -> list[CatalogEntry]:
     return list(value)
 
 
+def load_manifest(dotted: str) -> ServiceManifest:
+    """Resolve ``module.path:ATTR`` to a :class:`ServiceManifest`."""
+    if ":" not in dotted:
+        raise ValueError(f"Expected 'module.path:ATTR', got {dotted!r}")
+    module_path, attr = dotted.split(":", 1)
+    module = importlib.import_module(module_path)
+    try:
+        value = getattr(module, attr)
+    except AttributeError as exc:
+        raise ValueError(
+            f"Module {module_path!r} has no attribute {attr!r}"
+        ) from exc
+    if not isinstance(value, ServiceManifest):
+        raise ValueError(
+            f"{dotted!r} is not a ServiceManifest (got "
+            f"{type(value).__name__})"
+        )
+    return value
+
+
 async def run(
     args: argparse.Namespace,
     *,
@@ -102,6 +137,7 @@ async def run(
     service_repo: ServiceRepository | None = None,
     session_factory: object | None = None,
     catalog_loader: CatalogLoader = load_catalog,
+    manifest_loader: ManifestLoader = load_manifest,
 ) -> SyncResult:
     dispose: Callable[[], Awaitable[None]] | None = None
     if repo is None:
@@ -134,6 +170,17 @@ async def run(
             )
 
     entries = catalog_loader(args.catalog)
+
+    display_label = None
+    if args.service_manifest:
+        manifest = manifest_loader(args.service_manifest)
+        if str(manifest.name) != args.service:
+            raise SystemExit(
+                f"manifest name {str(manifest.name)!r} does not match "
+                f"--service {args.service!r}"
+            )
+        display_label = manifest.display_label
+
     use_case = SyncPermissionCatalogUseCase(
         catalog_repo=repo, service_repo=service_repo
     )
@@ -152,6 +199,7 @@ async def run(
         result = await use_case.execute(
             service_name=args.service,
             entries=entries,
+            display_label=display_label,
             dry_run=args.dry_run,
         )
     finally:

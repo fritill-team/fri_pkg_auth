@@ -30,6 +30,11 @@ class SqlAlchemyServiceRepository:
     model: type = field(default=DefaultServiceORM)
 
     async def upsert_many(self, services: Sequence[ServiceSpec]) -> None:
+        """Vendor flag overlay: set ``auto_provision`` / ``saas_available``.
+
+        On insert the spec's ``display_label`` seeds the row; on conflict the
+        existing (service-owned) label is preserved — only the flags update.
+        """
         if not services:
             return
         rows = [
@@ -45,7 +50,6 @@ class SqlAlchemyServiceRepository:
         stmt = stmt.on_conflict_do_update(
             index_elements=["name"],
             set_={
-                "display_label": stmt.excluded.display_label,
                 "auto_provision": stmt.excluded.auto_provision,
                 "saas_available": stmt.excluded.saas_available,
             },
@@ -54,14 +58,29 @@ class SqlAlchemyServiceRepository:
             await session.execute(stmt)
             await session.commit()
 
-    async def ensure_exists(self, *, service_name: str) -> None:
-        """Insert a bare service row if missing; never overwrite vendor flags."""
+    async def register_identity(
+        self, *, name: str, display_label: LocalizedText | None = None
+    ) -> None:
+        """Self-register a service's identity; never overwrite vendor flags.
+
+        Inserts a row with safe default flags if absent. If a non-empty
+        ``display_label`` is given, it is set on insert and on conflict
+        (identity is service-owned); the flags are left untouched.
+        """
+        label = display_label.as_dict() if display_label is not None else None
         stmt = pg_insert(self.model).values(
-            name=service_name,
+            name=name,
+            display_label=label or None,
             auto_provision=False,
             saas_available=False,
         )
-        stmt = stmt.on_conflict_do_nothing(index_elements=["name"])
+        if label:
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["name"],
+                set_={"display_label": stmt.excluded.display_label},
+            )
+        else:
+            stmt = stmt.on_conflict_do_nothing(index_elements=["name"])
         async with self.session_factory() as session:
             await session.execute(stmt)
             await session.commit()

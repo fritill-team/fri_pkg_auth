@@ -448,23 +448,42 @@ class FakeServiceRepository:
     _by_name: dict[str, Service] = field(default_factory=dict)
 
     async def upsert_many(self, services: Sequence[ServiceSpec]) -> None:
+        # Vendor flag overlay: set flags; preserve a service-owned label on
+        # conflict, seed it only on insert.
         for s in services:
+            existing = self._by_name.get(str(s.name))
             self._by_name[str(s.name)] = Service(
                 name=s.name,
-                display_label=s.display_label,
+                display_label=(
+                    existing.display_label if existing is not None
+                    else s.display_label
+                ),
                 auto_provision=s.auto_provision,
                 saas_available=s.saas_available,
-                created_at=_utcnow(),
+                created_at=existing.created_at if existing else _utcnow(),
             )
 
-    async def ensure_exists(self, *, service_name: str) -> None:
-        if service_name not in self._by_name:
-            self._by_name[service_name] = Service(
-                name=ServiceName(service_name),
-                display_label=LocalizedText({}),
+    async def register_identity(
+        self, *, name: str, display_label: LocalizedText | None = None
+    ) -> None:
+        label = display_label if display_label is not None else LocalizedText({})
+        existing = self._by_name.get(name)
+        if existing is None:
+            self._by_name[name] = Service(
+                name=ServiceName(name),
+                display_label=label,
                 auto_provision=False,
                 saas_available=False,
                 created_at=_utcnow(),
+            )
+        elif label.as_dict():
+            # Identity is service-owned: update the label, keep vendor flags.
+            self._by_name[name] = Service(
+                name=existing.name,
+                display_label=label,
+                auto_provision=existing.auto_provision,
+                saas_available=existing.saas_available,
+                created_at=existing.created_at,
             )
 
     async def get(self, name: ServiceName) -> Service | None:

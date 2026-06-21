@@ -4,6 +4,7 @@ from uuid import uuid4
 import pytest
 
 from pkg_auth.authorization import (
+    LocalizedText,
     OrgId,
     ServiceName,
     ServiceNotSaaSAvailable,
@@ -28,7 +29,7 @@ from .fakes import FakeOrganizationServiceRepository, FakeServiceRepository
 # --------------------------------------------------------------------------- #
 
 
-async def test_sync_services_upserts_and_prunes():
+async def test_sync_services_upserts_and_prunes_when_opted_in():
     repo = FakeServiceRepository()
     await repo.upsert_many([ServiceSpec.make("legacy")])
 
@@ -37,7 +38,8 @@ async def test_sync_services_upserts_and_prunes():
         services=[
             ServiceSpec.make("users", {"en": "Users"}, auto_provision=True),
             ServiceSpec.make("assessments", saas_available=True),
-        ]
+        ],
+        prune=True,
     )
     assert result.upserted == 2
     assert result.pruned == 1
@@ -45,12 +47,41 @@ async def test_sync_services_upserts_and_prunes():
     assert names == ["assessments", "users"]
 
 
+async def test_sync_services_does_not_prune_by_default():
+    # Overlay model: a service the vendor list omits is left ungoverned, not
+    # deleted (it owns its own identity row).
+    repo = FakeServiceRepository()
+    await repo.upsert_many([ServiceSpec.make("legacy")])
+
+    uc = SyncServiceCatalogUseCase(service_repo=repo)
+    result = await uc.execute(services=[ServiceSpec.make("users")])
+    assert result.pruned == 0
+    names = sorted(str(s.name) for s in await repo.list_all())
+    assert names == ["legacy", "users"]
+
+
+async def test_sync_services_preserves_self_registered_label():
+    # The vendor overlay sets flags but must not clobber a service-owned label.
+    repo = FakeServiceRepository()
+    await repo.register_identity(
+        name="courses", display_label=LocalizedText({"en": "Courses"})
+    )
+
+    uc = SyncServiceCatalogUseCase(service_repo=repo)
+    await uc.execute(services=[ServiceSpec.make("courses", saas_available=True)])
+
+    svc = await repo.get(ServiceName("courses"))
+    assert svc is not None
+    assert svc.saas_available is True
+    assert svc.display_label.as_dict() == {"en": "Courses"}
+
+
 async def test_sync_services_dry_run_does_not_write():
     repo = FakeServiceRepository()
     await repo.upsert_many([ServiceSpec.make("legacy")])
     uc = SyncServiceCatalogUseCase(service_repo=repo)
     result = await uc.execute(
-        services=[ServiceSpec.make("users")], dry_run=True
+        services=[ServiceSpec.make("users")], prune=True, dry_run=True
     )
     assert result.pruned == 1 and result.dry_run is True
     assert [str(s.name) for s in await repo.list_all()] == ["legacy"]

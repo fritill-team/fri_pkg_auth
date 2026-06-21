@@ -40,13 +40,28 @@ async def test_run_syncs_via_injected_repo() -> None:
     await repo.upsert_many([ServiceSpec.make("legacy")])
 
     parser = build_arg_parser()
-    args = parser.parse_args(["--services", f"{__name__}:SAMPLE_SERVICES"])
+    args = parser.parse_args(
+        ["--services", f"{__name__}:SAMPLE_SERVICES", "--prune"]
+    )
     result = await run(args, repo=repo)
 
     assert result.upserted == 2
     assert result.pruned == 1
     names = sorted(str(s.name) for s in await repo.list_all())
     assert names == ["assessments", "users"]
+
+
+async def test_run_does_not_prune_without_flag() -> None:
+    repo = FakeServiceRepository()
+    await repo.upsert_many([ServiceSpec.make("legacy")])
+
+    parser = build_arg_parser()
+    args = parser.parse_args(["--services", f"{__name__}:SAMPLE_SERVICES"])
+    result = await run(args, repo=repo)
+
+    assert result.pruned == 0
+    names = sorted(str(s.name) for s in await repo.list_all())
+    assert names == ["assessments", "legacy", "users"]
 
 
 async def test_run_dry_run_does_not_write(
@@ -57,7 +72,7 @@ async def test_run_dry_run_does_not_write(
 
     parser = build_arg_parser()
     args = parser.parse_args(
-        ["--services", f"{__name__}:SAMPLE_SERVICES", "--dry-run"]
+        ["--services", f"{__name__}:SAMPLE_SERVICES", "--prune", "--dry-run"]
     )
     result = await run(args, repo=repo)
 

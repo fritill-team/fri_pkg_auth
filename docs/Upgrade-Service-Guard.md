@@ -85,26 +85,51 @@ schema changes itself. The bundled migrations `0003`–`0005` are the reference.
                      {"en": "Edit course", "ar": "تعديل الدورة"})
    ```
 
-5. **Service registry** — declare the vendor service config and sync it
-   (vendor-only — this is where `auto_provision` / `saas_available` are set):
+5. **Service registry** — ownership is split (the *overlay* model):
 
-   ```python
-   # platform/services.py
-   from pkg_auth.authorization import ServiceSpec
-   SERVICES = [
-       ServiceSpec.make("users", {"en": "Users"}, auto_provision=True),
-       ServiceSpec.make("assessments", {"en": "Assessments"}, saas_available=True),
-       ServiceSpec.make("courses", {"en": "Courses"}, saas_available=True),
-   ]
-   ```
+   - **Each service registers its own identity** (`name` + `display_label`)
+     when it syncs its catalog. Export a `ServiceManifest` next to the catalog
+     and pass it to `pkg-auth-sync-catalog --service-manifest`:
 
-   ```bash
-   pkg-auth-sync-services --services platform.services:SERVICES \
-       --db-url "$ACL_DATABASE_URL"
-   ```
+     ```python
+     # courses/domain/permissions.py
+     from pkg_auth.authorization import ServiceManifest, CatalogEntry
+     SERVICE = ServiceManifest.make("courses", {"en": "Courses", "ar": "الدورات"})
+     CATALOG = [ CatalogEntry.make(...), ... ]
+     ```
 
-   Mark core services every org needs (e.g. `users`) `auto_provision=True`,
-   otherwise default-deny will strip their perms for normal orgs.
+     ```bash
+     pkg-auth-sync-catalog --service courses \
+         --catalog courses.domain.permissions:CATALOG \
+         --service-manifest courses.domain.permissions:SERVICE \
+         --db-url "$ACL_DATABASE_URL"
+     ```
+
+   - **The vendor owns only the flags** — `auto_provision` / `saas_available` —
+     set via `pkg-auth-sync-services` (this is the *only* path that sets them):
+
+     ```python
+     # platform/services.py
+     from pkg_auth.authorization import ServiceSpec
+     SERVICES = [
+         ServiceSpec.make("users", auto_provision=True),
+         ServiceSpec.make("assessments", saas_available=True),
+         ServiceSpec.make("courses", saas_available=True),
+     ]
+     ```
+
+     ```bash
+     pkg-auth-sync-services --services platform.services:SERVICES \
+         --db-url "$ACL_DATABASE_URL"
+     ```
+
+   The two paths don't clobber each other: sync-services sets flags without
+   overwriting a service-owned `display_label`, and sync-catalog sets the label
+   without touching the flags. **sync-services does not prune by default**
+   (a service it omits is left ungoverned, not deleted) — pass `--prune` only
+   for an explicit central cleanup. Mark core services every org needs (e.g.
+   `users`) `auto_provision=True`, otherwise default-deny strips their perms for
+   normal orgs.
 
 6. **Provision on org creation** — call `ProvisionDefaultServicesUseCase` from
    your org-creation flow (`app/use_cases/organizations/create_organization.py`):

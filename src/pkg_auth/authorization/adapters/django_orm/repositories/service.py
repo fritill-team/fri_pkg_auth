@@ -25,8 +25,14 @@ class DjangoServiceRepository:
     model: type = field(default=DefaultServiceModel)
 
     async def upsert_many(self, services: Sequence[ServiceSpec]) -> None:
+        """Vendor flag overlay: set flags, seed label only on create.
+
+        On conflict the existing (service-owned) ``display_label`` is preserved
+        — only the vendor flags update. Written without ``create_defaults`` so
+        it works on Django 4.2.
+        """
         for s in services:
-            await self.model.objects.aupdate_or_create(
+            obj, created = await self.model.objects.aget_or_create(
                 name=str(s.name),
                 defaults={
                     "display_label": s.display_label.as_dict() or None,
@@ -34,12 +40,29 @@ class DjangoServiceRepository:
                     "saas_available": s.saas_available,
                 },
             )
+            if not created:
+                obj.auto_provision = s.auto_provision
+                obj.saas_available = s.saas_available
+                await obj.asave(
+                    update_fields=["auto_provision", "saas_available"]
+                )
 
-    async def ensure_exists(self, *, service_name: str) -> None:
-        await self.model.objects.aget_or_create(
-            name=service_name,
-            defaults={"auto_provision": False, "saas_available": False},
+    async def register_identity(
+        self, *, name: str, display_label: LocalizedText | None = None
+    ) -> None:
+        """Self-register identity; never overwrite vendor flags."""
+        label = display_label.as_dict() if display_label is not None else None
+        obj, created = await self.model.objects.aget_or_create(
+            name=name,
+            defaults={
+                "display_label": label or None,
+                "auto_provision": False,
+                "saas_available": False,
+            },
         )
+        if not created and label:
+            obj.display_label = label
+            await obj.asave(update_fields=["display_label"])
 
     async def get(self, name: ServiceName) -> Service | None:
         row = await self.model.objects.filter(name=str(name)).afirst()

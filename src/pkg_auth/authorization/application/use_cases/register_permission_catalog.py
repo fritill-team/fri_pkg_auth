@@ -10,7 +10,38 @@ from ...domain.value_objects import (
     LocalizedText,
     PermissionKey,
     PermissionVisibility,
+    ServiceName,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class ServiceManifest:
+    """A service's self-declared identity for the service registry.
+
+    A service ships this alongside its permission catalog so it registers
+    *itself* (name + localized ``display_label``) when ``pkg-auth-sync-catalog``
+    runs. It deliberately carries no vendor flags (``auto_provision`` /
+    ``saas_available``) — those stay vendor-owned via ``pkg-auth-sync-services``.
+    """
+
+    name: ServiceName
+    display_label: LocalizedText = field(default_factory=lambda: LocalizedText({}))
+
+    @classmethod
+    def make(
+        cls,
+        name: ServiceName | str,
+        display_label: "LocalizedText | Mapping[str, str] | str | None" = None,
+        *,
+        default_locale_: str | None = None,
+    ) -> "ServiceManifest":
+        loc = default_locale_ or default_locale()
+        return cls(
+            name=name if isinstance(name, ServiceName) else ServiceName(name),
+            display_label=LocalizedText.from_input(
+                display_label, default_locale=loc
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,10 +129,10 @@ class RegisterPermissionCatalogUseCase:
     restart is safe and converges. Re-registering the same key with a
     different ``visibility`` flips it.
 
-    When a ``service_repo`` is wired, a bare ``services`` row is ensured for
-    ``service_name`` (safe defaults, never overwriting vendor flags) so the
-    default-deny service guard does not strip the service's perms before the
-    vendor configures it.
+    When a ``service_repo`` is wired, the service registers its own identity
+    row (``name`` + optional ``display_label``) with safe default flags, never
+    overwriting vendor flags, so the default-deny service guard does not strip
+    the service's perms before the vendor configures it.
     """
 
     catalog_repo: PermissionCatalogRepository
@@ -112,10 +143,13 @@ class RegisterPermissionCatalogUseCase:
         *,
         service_name: str,
         entries: Sequence[CatalogEntryInput],
+        display_label: LocalizedText | None = None,
     ) -> None:
         normalized = [_normalize_entry(e) for e in entries]
         if self.service_repo is not None:
-            await self.service_repo.ensure_exists(service_name=service_name)
+            await self.service_repo.register_identity(
+                name=service_name, display_label=display_label
+            )
         await self.catalog_repo.register_many(
             service_name=service_name,
             entries=normalized,

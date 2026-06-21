@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Sequence
 
 from ...domain.ports import PermissionCatalogRepository, ServiceRepository
+from ...domain.value_objects import LocalizedText
 from .register_permission_catalog import (
     CatalogEntry,
     CatalogEntryInput,
@@ -51,6 +52,7 @@ class SyncPermissionCatalogUseCase:
         *,
         service_name: str,
         entries: Sequence[CatalogEntryInput],
+        display_label: LocalizedText | None = None,
         dry_run: bool = False,
     ) -> SyncResult:
         normalized: list[CatalogEntry] = [_normalize_entry(e) for e in entries]
@@ -70,7 +72,9 @@ class SyncPermissionCatalogUseCase:
             )
 
         if self.service_repo is not None:
-            await self.service_repo.ensure_exists(service_name=service_name)
+            await self.service_repo.register_identity(
+                name=service_name, display_label=display_label
+            )
         await self.catalog_repo.register_many(
             service_name=service_name,
             entries=normalized,

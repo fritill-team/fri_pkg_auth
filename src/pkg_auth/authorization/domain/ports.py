@@ -20,6 +20,7 @@ from .entities import (
     User,
 )
 from .value_objects import (
+    LocalizedText,
     OrgId,
     PermissionKey,
     RoleId,
@@ -176,16 +177,34 @@ class PermissionCatalogRepository(Protocol):
 class ServiceRepository(Protocol):
     """Read/write access to the ``services`` table (the service registry).
 
-    Vendor-controlled flags (``auto_provision``, ``saas_available``) are
-    written only via :meth:`upsert_many` (the ``pkg-auth-sync-services``
-    path). :meth:`ensure_exists` is called during permission-catalog
-    registration to create a bare row with safe defaults so the
-    default-deny guard does not strip a newly-registered service's perms
-    before the vendor configures it; it must NOT overwrite existing flags.
+    Ownership is split into two non-overlapping concerns so services can be
+    rolled out independently (the *overlay* model):
+
+    - **Identity** (``name`` + ``display_label``) is owned by each service and
+      written via :meth:`register_identity` from its own catalog sync
+      (``pkg-auth-sync-catalog``). A service registers itself.
+    - **Vendor flags** (``auto_provision``, ``saas_available``) are owned by the
+      vendor and written via :meth:`upsert_many` (``pkg-auth-sync-services``).
+
+    Neither path clobbers the other's fields: :meth:`register_identity` never
+    touches the flags, and :meth:`upsert_many` never overwrites an existing
+    row's ``display_label``. Because each service owns its own row,
+    ``pkg-auth-sync-services`` does NOT prune by default; :meth:`prune_absent`
+    remains available for an explicit, opt-in cleanup.
     """
 
     async def upsert_many(self, services: Sequence["ServiceSpec"]) -> None: ...
-    async def ensure_exists(self, *, service_name: str) -> None: ...
+    async def register_identity(
+        self, *, name: str, display_label: LocalizedText | None = None
+    ) -> None:
+        """Self-register a service's identity (idempotent).
+
+        Insert a row for ``name`` if absent (flags default ``False`` so the
+        default-deny guard does not strip the service's perms before the vendor
+        configures it). If the row exists, update ``display_label`` only when a
+        non-empty label is given; never touch the vendor flags.
+        """
+        ...
     async def get(self, name: ServiceName) -> Service | None: ...
     async def list_all(self) -> list[Service]: ...
     async def prune_absent(

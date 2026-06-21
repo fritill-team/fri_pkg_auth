@@ -64,6 +64,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--prune",
+        action="store_true",
+        help=(
+            "Also DELETE services not in this list. Off by default (overlay "
+            "model: services own their own identity rows). Use only for an "
+            "explicit central cleanup."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Do not write. Print what would be upserted / pruned and exit 0.",
@@ -121,10 +130,13 @@ async def run(
         existing = {str(s.name) for s in await repo.list_all()}
         declared = {str(s.name) for s in services}
         print(f"[dry-run] to add:   {sorted(declared - existing)}")
-        print(f"[dry-run] to prune: {sorted(existing - declared)}")
+        if args.prune:
+            print(f"[dry-run] to prune: {sorted(existing - declared)}")
 
     try:
-        result = await use_case.execute(services=services, dry_run=args.dry_run)
+        result = await use_case.execute(
+            services=services, prune=args.prune, dry_run=args.dry_run
+        )
     finally:
         if dispose is not None:
             await dispose()

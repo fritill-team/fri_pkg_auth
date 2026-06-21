@@ -15,7 +15,10 @@ adapters in M4 / M6; cache layer in M5; framework integrations in M7-M9.
 """
 from __future__ import annotations
 
-from .application.use_cases.register_permission_catalog import CatalogEntry
+from .application.use_cases.register_permission_catalog import (
+    CatalogEntry,
+    ServiceManifest,
+)
 from .application.use_cases.sync_service_catalog import ServiceSpec
 from .config import default_locale
 from .domain.entities import (
@@ -96,6 +99,7 @@ __all__ = [
     # Application DTOs
     "CatalogEntry",
     "ServiceSpec",
+    "ServiceManifest",
     "PermissionScope",
     # Config
     "default_locale",

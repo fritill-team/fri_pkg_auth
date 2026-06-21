@@ -3,6 +3,31 @@
 All notable changes to `pkg-auth` are documented here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.1.0] — 2026-06-21
+
+### Added
+
+- **Service self-registration** (overlay model): a service registers its own
+  identity (`name` + localized `display_label`) when it syncs its permission
+  catalog. New `ServiceManifest` (+ `ServiceManifest.make`); a service exports
+  one alongside its catalog and passes it via the new `--service-manifest`
+  option on `pkg-auth-sync-catalog`. `RegisterPermissionCatalogUseCase` /
+  `SyncPermissionCatalogUseCase` now accept an optional `display_label`.
+- `ServiceRepository.register_identity(name, display_label=None)` replaces the
+  internal `ensure_exists`: inserts a bare row (safe default flags) if absent,
+  updates only `display_label` if a non-empty label is given, and never touches
+  the vendor flags.
+
+### Changed
+
+- **`pkg-auth-sync-services` no longer prunes by default.** Because each service
+  now owns its identity row, the vendor sync became a *flag overlay*: it sets
+  `auto_provision` / `saas_available` without clobbering a service-owned
+  `display_label`, and leaves services it doesn't list untouched. Pass the new
+  `--prune` flag (or `prune=True` to `SyncServiceCatalogUseCase.execute`) for an
+  explicit central cleanup. `upsert_many` now preserves an existing row's
+  `display_label` (sets it only on insert).
+
 ## [3.0.0] — 2026-06-21
 
 ### Added

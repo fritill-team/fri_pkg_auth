@@ -59,7 +59,16 @@ class ServiceSyncResult:
 
 @dataclass(slots=True)
 class SyncServiceCatalogUseCase:
-    """Upsert declared services then prune services no longer declared."""
+    """Apply vendor flags to declared services (the overlay model).
+
+    Upserts each declared service's vendor flags (``auto_provision`` /
+    ``saas_available``) without clobbering a service-owned ``display_label``.
+    Because each service registers its own identity row (via
+    ``pkg-auth-sync-catalog``), this does **not** prune by default — a service
+    the vendor list omits is simply left ungoverned, not deleted. Pass
+    ``prune=True`` for an explicit, central cleanup of services no longer
+    declared anywhere.
+    """
 
     service_repo: ServiceRepository
 
@@ -67,23 +76,28 @@ class SyncServiceCatalogUseCase:
         self,
         *,
         services: Sequence[ServiceSpec],
+        prune: bool = False,
         dry_run: bool = False,
     ) -> ServiceSyncResult:
         keep = [s.name for s in services]
 
         if dry_run:
-            existing = await self.service_repo.list_all()
-            existing_names = {str(s.name) for s in existing}
-            declared_names = {str(n) for n in keep}
-            would_prune = existing_names - declared_names
+            would_prune = 0
+            if prune:
+                existing = await self.service_repo.list_all()
+                existing_names = {str(s.name) for s in existing}
+                declared_names = {str(n) for n in keep}
+                would_prune = len(existing_names - declared_names)
             return ServiceSyncResult(
                 upserted=len(services),
-                pruned=len(would_prune),
+                pruned=would_prune,
                 dry_run=True,
             )
 
         await self.service_repo.upsert_many(services)
-        pruned = await self.service_repo.prune_absent(keep=keep)
+        pruned = 0
+        if prune:
+            pruned = await self.service_repo.prune_absent(keep=keep)
         return ServiceSyncResult(
             upserted=len(services),
             pruned=pruned,
