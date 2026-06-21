@@ -3,7 +3,7 @@ requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pkg-auth"
+name = "fri-pkg-auth"
 version = "2.1.0"
 description = "Clean-architecture auth core for multiple Python frameworks"
 readme = "README.md"
@@ -75,11 +75,13 @@ all = [
 
 
 [project.urls]
-Homepage = "https://github.com/itqadem-apps/pkg_auth"
+Homepage = "https://github.com/fritill-team/fri_pkg_auth"
+Repository = "https://github.com/fritill-team/fri_pkg_auth"
 
 [project.scripts]
 keycloak-init-client = "pkg_auth.admin.cli:main"
 pkg-auth-sync-catalog = "pkg_auth.authorization.cli.sync_catalog:main"
+pkg-auth-sync-services = "pkg_auth.authorization.cli.sync_services:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
