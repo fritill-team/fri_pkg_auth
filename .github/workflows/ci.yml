@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main ]
   pull_request:
-  # Allows the prepare (auto-release) workflow to gate on tests before tagging.
+  # Reusable: lets a release workflow gate on tests before tagging.
   workflow_call:
 
 permissions:

@@ -3,8 +3,8 @@ name: Publish pkg_auth
 # Separate publish workflow: build the distribution, attach it to a GitHub
 # Release, and publish to PyPI via Trusted Publishing (OIDC — no stored token).
 #
-# Invoked two ways, both kept out of the test/prepare workflows:
-#   - workflow_call  → from auto-release (push to main) and the manual release
+# Invoked two ways:
+#   - workflow_call  → from the manual release workflow (release-pkg-auth.yml)
 #   - workflow_dispatch → run by a maintainer for an existing tag
 on:
   workflow_call:
