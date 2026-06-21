@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/fri-pkg-auth
+      url: https://pypi.org/p/pkg-auth
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -65,11 +65,11 @@ jobs:
           name: pkg_auth v${{ inputs.version }}
           fail_on_unmatched_files: false
           body: |
-            Release for fri-pkg-auth (mode: ${{ inputs.mode }}).
+            Release for pkg-auth (mode: ${{ inputs.mode }}).
 
             Install from PyPI:
 
-            pip install "fri-pkg-auth==${{ inputs.version }}"
+            pip install "pkg-auth==${{ inputs.version }}"
 
             Or install from the tag:
 
