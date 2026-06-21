@@ -29,7 +29,7 @@ v1.0 is a breaking release. The old claim-based authorization model is removed e
 
 2. **`IdentityContext` replaces `AccessContext`.** It's a flat frozen dataclass with only identity/session fields. No `rights` attribute. The `subject` field is now *required* (previously optional).
 
-3. **`AuthContext` is the new authorization primitive.** It carries `user_id`, `organization_id`, `role_name`, and `perms: frozenset[str]`. You get it from `make_get_auth_context()`'s Depends-able, which reads `X-Organization-Id` from the request header.
+3. **`AuthContext` is the new authorization primitive.** It carries `user_id`, `organization_id`, `role_names: frozenset[str]`, and `perms: frozenset[str]`. You get it from `make_get_auth_context()`'s Depends-able, which reads `X-Organization-Id` from the request header.
 
 4. **Permission keys live in the DB**, not in Keycloak client roles. Each service registers its perms on boot via `RegisterPermissionCatalogUseCase`. Roles are built from those perms in the users service's admin UI.
 

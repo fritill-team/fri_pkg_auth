@@ -50,8 +50,8 @@ async def me(
     return {
         "subject": identity.subject_str,
         "email": identity.email_str,
-        "org_id": int(auth_ctx.organization_id),
-        "role": str(auth_ctx.role_name),
+        "org_id": str(auth_ctx.organization_id),
+        "roles": sorted(auth_ctx.role_names),
         "perms": sorted(auth_ctx.perms),
     }
 
@@ -67,8 +67,8 @@ async def get_course(
     _, auth_ctx = bundle
     return {
         "course_id": course_id,
-        "org_id": int(auth_ctx.organization_id),
-        "role": str(auth_ctx.role_name),
+        "org_id": str(auth_ctx.organization_id),
+        "roles": sorted(auth_ctx.role_names),
     }
 
 
@@ -84,7 +84,7 @@ async def publish_course(
     return {
         "course_id": course_id,
         "published_by": identity.subject_str,
-        "org_id": int(auth_ctx.organization_id),
+        "org_id": str(auth_ctx.organization_id),
     }
 
 

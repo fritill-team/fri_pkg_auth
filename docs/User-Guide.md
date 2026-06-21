@@ -1,81 +1,125 @@
 # User Guide
 
-This guide provides an overview of how to use `pkg-auth` to secure your applications.
+This guide covers the core concepts of `pkg-auth` and how to protect routes.
+For framework wiring details see [FastAPI](FastAPI), [Django](Django), and
+[Strawberry](Strawberry).
 
-## Key Concepts
+## IdentityContext vs AuthContext
 
-- **Access Token**: A JSON Web Token (JWT) that contains information about the authenticated user and their permissions.
-- **Access Context**: A Pydantic model that represents the claims in the access token.
-- **Permissions**: A set of strings that define what actions a user is allowed to perform.
-- **Realm Roles**: A set of strings that define the user's roles within a Keycloak realm.
-- **Client Roles**: A set of strings that define the user's roles within a Keycloak client.
+`pkg-auth` splits *who you are* from *what you can do*:
 
-## Getting Started
+- **`IdentityContext`** comes from `pkg_auth.authentication`. It is the result of
+  validating a Keycloak JWT — identity claims only, no database access.
+- **`AuthContext`** comes from `pkg_auth.authorization`. It is the resolved,
+  per-request authorization state for a `(user, organization)` pair:
 
-To get started with `pkg-auth`, you'll need to configure it with your Keycloak instance. This is done using the `create_auth_dependencies_from_keycloak` function, which returns an `AuthDependencies` object.
+  ```python
+  auth_ctx.user_id
+  auth_ctx.organization_id
+  auth_ctx.role_names   # frozenset[str] — a user may hold multiple roles
+  auth_ctx.perms        # frozenset[str] — union of all active roles' perms
 
-```python
-from pkg_auth.integrations.common.auth_factory import create_auth_dependencies_from_keycloak
+  auth_ctx.has("course:view")        # -> bool
+  auth_ctx.require("course:edit")    # raises MissingPermission
+  auth_ctx.has_role("instructor")    # -> bool
+  ```
 
-auth_deps = create_auth_dependencies_from_keycloak(
-    keycloak_base_url="http://localhost:8080",
-    realm="my-realm",
-    client_id="my-client",
-)
-```
+## The permission model
 
-The `create_auth_dependencies_from_keycloak` function takes the following arguments:
+Permissions are `resource:action` keys held in a global catalog. Each entry has:
 
-- `keycloak_base_url`: The base URL of your Keycloak instance.
-- `realm`: The name of the Keycloak realm to use.
-- `client_id`: The ID of the Keycloak client to use.
-- `audience`: The audience of the JWT. If not provided, the `client_id` is used.
+- a **visibility** — `platform_only`, `shared` (default), or `tenant_only`; and
+- a **localized description** (`LocalizedText`, a `{locale: text}` JSONB map).
 
-## The `AuthDependencies` Object
-
-The `AuthDependencies` object provides a framework-agnostic facade for handling authentication and authorization. It has the following methods:
-
-- `authenticate(token: str) -> AccessContext`: Decodes and validates a JWT, returning an `AccessContext` object.
-- `authorize(context: AccessContext, requirements: Iterable[AccessRequirement]) -> AccessContext`: Checks if an `AccessContext` meets a set of access requirements.
-
-It also provides the following helper methods for creating `AccessRequirement` objects:
-
-- `require_permissions(any_of: Sequence[str] = (), all_of: Sequence[str] = ()) -> AccessRequirement`
-- `require_realm_roles(any_of: Sequence[str] = (), all_of: Sequence[str] = ()) -> AccessRequirement`
-- `require_client_roles(any_of: Sequence[str] = (), all_of: Sequence[str] = ()) -> AccessRequirement`
-
-## Example Usage
-
-Here's an example of how to use the `AuthDependencies` object to secure a route:
+Build entries with `CatalogEntry.make`, which coerces a plain string into the
+configured default locale (`ACL_DEFAULT_LOCALE`, default `en`):
 
 ```python
-from fastapi import APIRouter, Depends, HTTPException
-from pkg_auth import AccessContext
-from pkg_auth.integrations.common.auth_factory import create_auth_dependencies_from_keycloak
+from pkg_auth.authorization.application.use_cases.register_permission_catalog import (
+    CatalogEntry,
+)
+from pkg_auth.authorization.domain.value_objects import PermissionVisibility
 
-auth_deps = create_auth_dependencies_from_keycloak(
-    keycloak_base_url="http://localhost:8080",
-    realm="my-realm",
-    client_id="my-client",
+entries = [
+    CatalogEntry.make("course:view", "View a course"),
+    CatalogEntry.make("course:edit", {"en": "Edit a course", "ar": "تعديل دورة"}),
+    CatalogEntry.make(
+        "organizations:create",
+        "Create organizations",
+        PermissionVisibility.PLATFORM_ONLY,
+    ),
+]
+```
+
+## Registering a catalog on boot
+
+Each service idempotently registers the permission keys it knows about on
+startup. The repository upserts by key, so calling it on every restart is safe.
+
+```python
+from pkg_auth.authorization.application.use_cases.register_permission_catalog import (
+    RegisterPermissionCatalogUseCase,
 )
 
-router = APIRouter()
-
-def get_current_user(token: str) -> AccessContext:
-    try:
-        return auth_deps.authenticate(token)
-    except Exception as e:
-        raise HTTPException(status_code=401, detail=str(e))
-
-@router.get("/me")
-async def me(current_user: AccessContext = Depends(get_current_user)):
-    return {"email": current_user.email}
-
-@router.get("/articles")
-async def list_articles(current_user: AccessContext = Depends(get_current_user)):
-    auth_deps.authorize(
-        current_user,
-        [auth_deps.require_permissions(all_of=["articles:read"])]
-    )
-    # ...
+await RegisterPermissionCatalogUseCase(
+    catalog_repo=catalog_repo,
+    service_repo=service_repo,  # optional: ensures a services row exists
+).execute(service_name="courses", entries=entries)
 ```
+
+## Mode A vs Mode B
+
+- **Mode A (source of truth)** — your service owns the `users` table, extends the
+  bundled mixins, applies the schema, and lazily upserts users from the JWT with
+  `SyncUserFromJwtUseCase`.
+- **Mode B (consumer)** — your service shares the central ACL read-only and uses
+  `ResolveUserFromJwtUseCase`, which 403s if the user is not provisioned.
+
+You pass **exactly one** of `sync_user_use_case` (Mode A) or
+`resolve_user_use_case` (Mode B) when wiring the auth-context dependency.
+
+## Protecting routes (FastAPI)
+
+```python
+from fastapi import Depends, FastAPI
+from pkg_auth.authentication import IdentityContext
+from pkg_auth.authorization import AuthContext
+from pkg_auth.integrations.fastapi import require_permission
+
+app = FastAPI()
+
+@app.get("/courses/{id}")
+async def get_course(
+    id: str,
+    bundle: tuple[IdentityContext, AuthContext] = Depends(
+        require_permission("course:view", get_auth_context=get_auth_context)
+    ),
+):
+    identity, auth_ctx = bundle
+    return {"course_id": id, "roles": sorted(auth_ctx.role_names)}
+```
+
+See [FastAPI](FastAPI) for building `get_auth_context`, and [Django](Django) /
+[Strawberry](Strawberry) for the equivalents.
+
+## Platform-admin checks
+
+`AuthContext` deliberately carries no `is_platform` flag. Platform-admin
+detection is a service-level policy: cache your platform org's id at startup and
+compare with the helper:
+
+```python
+from pkg_auth.authorization import is_platform_context
+
+if is_platform_context(auth_ctx, platform_org_id):
+    ...  # platform-admin path
+```
+
+## Services and the service guard
+
+Organizations are entitled to **services**, and the default-deny **service guard**
+drops any resolved permission whose owning service the org has not enabled (the
+platform org bypasses the guard). This is configured when building the auth
+context, not at the route level. See
+[Authorization](Authorization) for the model and
+[Upgrade-Service-Guard](Upgrade-Service-Guard) for wiring.

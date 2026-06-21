@@ -10,6 +10,9 @@ must read through, never write: use `ResolveUserFromJwtUseCase`.
 from pkg_auth.authorization.application.use_cases.resolve_user_from_jwt import (
     ResolveUserFromJwtUseCase,
 )
+from pkg_auth.authorization.application.use_cases.resolve_auth_context import (
+    ResolveAuthContextUseCase,
+)
 from pkg_auth.integrations.fastapi import (
     create_authentication,
     make_get_auth_context,
@@ -26,6 +29,7 @@ auth = create_authentication(
 
 # 2. Authorization context (composes identity + ACL lookup)
 resolve_user = ResolveUserFromJwtUseCase(user_repo=user_repo)
+resolve = ResolveAuthContextUseCase(membership_repo=membership_repo)
 get_auth_context = make_get_auth_context(
     get_identity=auth.get_identity,
     resolve_user_use_case=resolve_user,       # Mode B — reader
@@ -37,6 +41,28 @@ get_auth_context = make_get_auth_context(
 # 3. Exception handlers (optional — makes domain errors map to HTTP)
 install_exception_handlers(app)
 ```
+
+To enable the optional **service guard** (default-deny: resolved perms are
+filtered to the services the org has enabled), construct `resolve` with the
+extra repos — the platform org bypasses the guard:
+
+```python
+from pkg_auth.authorization.application.use_cases.resolve_auth_context import (
+    ResolveAuthContextUseCase,
+)
+
+resolve = ResolveAuthContextUseCase(
+    membership_repo=membership_repo,
+    org_service_repo=org_service_repo,   # e.g. SqlAlchemyOrganizationServiceRepository
+    catalog_repo=catalog_repo,
+    platform_org_id=platform_org_id,
+)
+```
+
+Keep the org's enabled-service set in sync with the catalog via the
+`pkg-auth-sync-services` CLI, and wrap `org_service_repo` in
+`CachedOrganizationServiceRepository` to cache the enabled-service set on the
+guard hot path.
 
 A Mode B request whose Keycloak `sub` hasn't been mirrored into the
 local ACL yet raises `UserNotProvisioned` → **HTTP 403**. That's the

@@ -94,6 +94,33 @@ For platform-admin detection see [Platform admin pattern](#platform-admin-patter
 below — pkg_auth ships a stateless helper rather than baking it into
 the middleware.
 
+#### Optional service guard
+
+`ResolveAuthContextUseCase` accepts an optional **service guard**
+(default-deny: resolved perms are filtered to the services the org has
+enabled). Wire it by passing `org_service_repo`, `catalog_repo`, and
+`platform_org_id` — the platform org bypasses the guard; leaving these unset
+disables filtering:
+
+```python
+from pkg_auth.authorization.adapters.django_orm.repositories import (
+    DjangoOrganizationServiceRepository,
+    DjangoPermissionCatalogRepository,
+)
+
+resolve_use_case=ResolveAuthContextUseCase(
+    membership_repo=DjangoMembershipRepository(),
+    org_service_repo=DjangoOrganizationServiceRepository(),
+    catalog_repo=DjangoPermissionCatalogRepository(),
+    platform_org_id=platform_org_id,
+)
+```
+
+Keep the org's enabled-service set in sync with the catalog via the
+`pkg-auth-sync-services` CLI, and wrap `org_service_repo` in
+`CachedOrganizationServiceRepository` to cache the enabled-service set on the
+guard hot path.
+
 ### 4. Add middleware (in order)
 
 ```python
@@ -116,7 +143,7 @@ If your Django service publishes its own permissions to the central
 catalog, register them on boot via the `CatalogEntry` shape:
 
 ```python
-from pkg_auth.authorization import CatalogEntry, PermissionKey
+from pkg_auth.authorization import CatalogEntry, PermissionKey, PermissionVisibility
 from pkg_auth.authorization.application.use_cases.register_permission_catalog import (
     RegisterPermissionCatalogUseCase,
 )
@@ -125,17 +152,28 @@ from pkg_auth.authorization.adapters.django_orm.repositories import (
 )
 
 CATALOG: list[CatalogEntry] = [
-    # Org-level perms (default is_platform=False)
+    # Org-level perms — visibility defaults to PermissionVisibility.SHARED
     CatalogEntry(PermissionKey("courses:create"), "Create a new course"),
     CatalogEntry(PermissionKey("courses:edit"),   "Edit course content"),
 
-    # Platform-level perms — only meaningful at the system level
+    # Platform-only perm — hidden from tenant orgs, only meaningful at the
+    # system level. The 3rd arg is the visibility ENUM (never a bool).
     CatalogEntry(
         PermissionKey("courses:moderate-globally"),
         "Cross-org course moderation",
-        is_platform=True,
+        visibility=PermissionVisibility.PLATFORM_ONLY,
+    ),
+
+    # Tenant-only perm — hidden from the platform org.
+    CatalogEntry(
+        PermissionKey("courses:self-enroll"),
+        "Enroll yourself in a course",
+        visibility=PermissionVisibility.TENANT_ONLY,
     ),
 ]
+
+# `description` accepts a plain str (coerced to LocalizedText using the default
+# locale from ACL_DEFAULT_LOCALE), a {locale: text} dict, or a LocalizedText.
 
 # Run once at startup, e.g. via a management command or AppConfig.ready()
 async def register_catalog():
@@ -432,14 +470,12 @@ unless `is_platform_context(auth_ctx, get_platform_org_id())` returns
 - **`role_name` AttributeError** on `AuthContext` — that field was
   renamed to `role_names: frozenset[str]` in v1.3 (multi-role per
   org). Use `auth_ctx.role_names` or `auth_ctx.has_role("editor")`.
-- **Permission catalog `is_platform` column missing** — apply the
-  bundled Alembic migration (`pkg_auth_acl_0002_add_permission_is_platform`)
-  or add the column manually:
-  ```python
-  op.add_column("permissions",
-      sa.Column("is_platform", sa.Boolean(), nullable=False,
-                server_default=sa.text("false")))
-  ```
+- **Permission catalog `visibility` column missing** — the `is_platform`
+  boolean was replaced by a `visibility` column. Apply the bundled Alembic
+  migrations: `pkg_auth_acl_0003` migrates `is_platform` → `visibility`
+  (`platform_only` / `shared` / `tenant_only`); `pkg_auth_acl_0004` makes
+  `description` JSONB (LocalizedText); `pkg_auth_acl_0005` adds the services
+  tables. Run `alembic upgrade pkg_auth_acl@head` to get all of them.
 - **Role permissions empty after `RoleRepository.create(...)`** —
   the consuming service must register its permission catalog
   *before* anyone calls `create()` with permission keys, otherwise

@@ -17,7 +17,7 @@ The schema lives in a Postgres schema called `acl` and contains:
 | `permissions` | Global permission catalog. Populated by services on boot. Each row has a `visibility` (`platform_only`/`shared`/`tenant_only`) and a localized JSONB `description`. |
 | `roles` | Per-org (or global template). Links to permissions via `role_permissions`. |
 | `role_permissions` | Many-to-many join between roles and permissions. |
-| `memberships` | One row per (user, org). Links user to a role in that org. `UNIQUE(user_id, organization_id)` enforces single-role per (user, org) in v1. |
+| `memberships` | One row per (user, org, role). Links a user to a role in an org. `UNIQUE(user_id, organization_id, role_id)` — a user may hold **multiple roles** per (user, org); the resolved `AuthContext.perms` is the **union** of all active roles' permissions. |
 | `membership_invitations` | Pending invitations for non-member users. |
 | `auth_audit_log` | Append-only log of ACL mutations. |
 | `services` | Service registry. Vendor-controlled `auto_provision` / `saas_available` flags, set via `pkg-auth-sync-services`. |
@@ -59,6 +59,10 @@ config.set_main_option(
 
 Then: `alembic upgrade pkg_auth_acl@head`
 
+The bundled revision chain runs `pkg_auth_acl_0001` (initial) through `0005`,
+including `0003` (permission visibility), `0004` (localized JSONB `description`),
+and `0005` (`services` + `organization_services` tables).
+
 Other services don't run migrations — they connect to the same database the users service migrated.
 
 ## Core concepts
@@ -72,11 +76,12 @@ The hot-path authorization primitive. Built once per request by `ResolveAuthCont
 class AuthContext:
     user_id: UserId
     organization_id: OrgId
-    role_name: RoleName
+    role_names: frozenset[str]
     perms: frozenset[str]
 
     def has(self, perm: str) -> bool: ...
     def require(self, perm: str) -> None: ...  # raises MissingPermission
+    def has_role(self, role: str) -> bool: ...
 ```
 
 ### Permission keys

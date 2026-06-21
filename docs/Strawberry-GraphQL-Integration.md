@@ -1,61 +1,41 @@
-# Strawberry GraphQL Integration
+# Strawberry GraphQL Integration (stub)
 
-Context getter and permission classes for Strawberry. Token extraction prefers `Authorization: Bearer <token>` and falls back to the `access_token` cookie.
+> The canonical Strawberry guide is **[docs/Strawberry.md](./Strawberry.md)**. It
+> covers Mode A vs Mode B wiring, permission classes, the `StrawberryContext`
+> object, and the optional service guard. This page is a short pointer kept for
+> backwards-compatible links.
 
-## `app/graphql.py`
+## Minimal current example
 
 ```python
 import strawberry
 from strawberry.fastapi import GraphQLRouter
 from pkg_auth.integrations.strawberry import (
-    create_strawberry_auth,
-    StrawberryAuthContext,
+    make_context_getter, IsAuthenticated, RequirePermission,
 )
-from app.config import settings
 
-strawberry_auth = create_strawberry_auth(
-    keycloak_base_url=settings.KEYCLOAK_BASE_URL,
-    realm=settings.KEYCLOAK_REALM,
-    client_id=settings.KEYCLOAK_CLIENT_ID,
-    # cookie_name="access_token",  # optional override
+context_getter = make_context_getter(
+    authenticate_use_case=authenticate_uc,
+    resolve_user_use_case=resolve_user_uc,   # Mode B — reader
+    resolve_use_case=resolve_uc,
+    organization_repo=org_repo,
 )
 
 @strawberry.type
 class Query:
-    @strawberry.field
-    def hello(self, info) -> str:
-        ctx: StrawberryAuthContext = info.context
-        return f"Hello, {ctx.user.email}" if ctx.user else "Hello, anonymous"
+    @strawberry.field(permission_classes=[IsAuthenticated])
+    async def me(self, info) -> str:
+        return info.context.identity.subject_str
+
+    @strawberry.field(permission_classes=[RequirePermission("course:view")])
+    async def course(self, id: strawberry.ID, info) -> Course:
+        auth_ctx = info.context.auth_context
+        ...
 
 schema = strawberry.Schema(query=Query)
-
-graphql_router = GraphQLRouter(
-    schema,
-    context_getter=strawberry_auth.make_context_getter(optional=True),
-)
+graphql_app = GraphQLRouter(schema, context_getter=context_getter)
 ```
 
-## Attach permissions to fields
-
-```python
-import strawberry
-from strawberry.types import Info
-from pkg_auth.integrations.strawberry import StrawberryAuthContext
-from app.graphql import strawberry_auth
-
-RequireAuthenticated = strawberry_auth.require_authenticated()
-RequireArticlesRead = strawberry_auth.require_permissions(["articles:read"])
-
-@strawberry.type
-class Article:
-    id: str
-    title: str
-
-@strawberry.type
-class Query:
-    @strawberry.field(permission_classes=[RequireAuthenticated, RequireArticlesRead])
-    def articles(self, info: Info) -> list[Article]:
-        ctx: StrawberryAuthContext = info.context
-        # ctx.user is guaranteed and has "articles:read"
-        ...
-```
+Every resolver receives a `StrawberryContext` via `info.context` with
+`identity` and `auth_context` fields. See [docs/Strawberry.md](./Strawberry.md)
+for the full reference.

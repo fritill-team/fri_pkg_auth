@@ -2,7 +2,7 @@
 
 Clean-architecture **identity + ACL** for multi-framework Python services. Handles JWT authentication (via Keycloak) and database-backed authorization (users, organizations, roles, permissions, memberships) in a single package with first-class support for **FastAPI**, **Django**, and **Strawberry GraphQL**.
 
-> **v1.0 is a breaking change from v0.x.** The old claim-based authorization model (`AccessContext`, `AccessRights`, `require_permissions`) is replaced by a real ACL database. See [`docs/MIGRATION_v1.md`](docs/MIGRATION_v1.md) for the upgrade guide.
+> **v3.0.0 is a breaking change.** The `permissions.is_platform` flag is replaced by a tri-state `visibility` enum (`platform_only`/`shared`/`tenant_only`); permission `description` is now a localized JSONB map; and a first-class **Service** model with a **default-deny service guard** is added. See [`docs/Upgrade-Service-Guard.md`](docs/Upgrade-Service-Guard.md) for the 3.0.0 upgrade guide. Earlier migrations: [`docs/MIGRATION_v1.md`](docs/MIGRATION_v1.md), [`docs/MIGRATION_v2.md`](docs/MIGRATION_v2.md).
 
 ## Install
 
@@ -10,15 +10,20 @@ Clean-architecture **identity + ACL** for multi-framework Python services. Handl
 # Core (identity only — no DB deps)
 pip install pkg-auth
 
-# With ACL + FastAPI (most common for itqadem services)
-pip install pkg-auth[acl-sqlalchemy,fastapi]
+# With ACL + FastAPI (most common for fritill services)
+pip install "pkg-auth[acl-sqlalchemy,fastapi]"
 
 # With ACL + Django
-pip install pkg-auth[acl-django,django]
+pip install "pkg-auth[acl-django,django]"
 
 # With optional Redis cache
-pip install pkg-auth[cache-redis]
+pip install "pkg-auth[cache-redis]"
+
+# Everything
+pip install "pkg-auth[all]"
 ```
+
+Available extras: `acl-sqlalchemy`, `acl-django`, `cache-redis`, `fastapi`, `django`, `strawberry`, `all`.
 
 ## Quickstart (FastAPI)
 
@@ -36,7 +41,7 @@ from pkg_auth.integrations.fastapi import (
 
 auth = create_authentication(
     keycloak_base_url="https://auth.example.com",
-    realm="itqadem",
+    realm="fritill",
     audience="courses-service",
 )
 
@@ -62,10 +67,21 @@ async def get_course(
     ),
 ):
     identity, auth_ctx = bundle
-    return {"course_id": id, "role": str(auth_ctx.role_name)}
+    return {"course_id": id, "roles": sorted(auth_ctx.role_names)}
 ```
 
 See [`examples/itqadem_courses_app`](examples/itqadem_courses_app) for a complete working example.
+
+## Features
+
+- **Authentication** — Keycloak JWT validation producing an `IdentityContext`.
+- **Authorization (ACL)** — database-backed users, organizations, roles, permissions, and memberships, resolved into a hot-path `AuthContext` (`role_names`, `perms`).
+- **Permission visibility** — tri-state catalog visibility (`platform_only` / `shared` / `tenant_only`).
+- **Localized descriptions** — permission descriptions stored as localized JSONB (`LocalizedText`, `ACL_DEFAULT_LOCALE`).
+- **Services & service guard** — first-class `Service` / `OrganizationService` model with a **default-deny** service guard; the platform org bypasses it.
+- **Mode A / Mode B** — be the source of truth for the `users` table, or consume a shared ACL read-only.
+- **Integrations** — FastAPI, Django, and Strawberry GraphQL.
+- **CLIs** — `keycloak-init-client`, `pkg-auth-sync-catalog`, `pkg-auth-sync-services`.
 
 ## Architecture
 
@@ -74,9 +90,9 @@ pkg_auth/
   authentication/             JWT validation → IdentityContext (identity only)
   authorization/              Full ACL (users, orgs, roles, perms, memberships)
     domain/                   Pure entities, ports (Protocol), exceptions
-    application/use_cases/    Business logic (13 use cases)
+    application/use_cases/    Business logic (use cases)
     adapters/
-      sqlalchemy/             Canonical schema + Alembic migration + repos
+      sqlalchemy/             Canonical schema + Alembic migrations (0001–0005) + repos
       django_orm/             Mirror models (managed=False) + repos
       cache/                  InMemoryTTLCache / RedisCache + decorator
   integrations/
@@ -90,10 +106,11 @@ pkg_auth/
 
 ## Documentation
 
-- [Authorization model](docs/Authorization.md) — schema, permission catalog, roles, memberships
+- [Authorization model](docs/Authorization.md) — schema, permission catalog, roles, memberships, service guard
+- [Upgrade to the Service Guard (3.0.0)](docs/Upgrade-Service-Guard.md)
 - [Caching](docs/Caching.md) — InMemoryTTLCache, RedisCache, invalidation contract
 - [FastAPI Integration](docs/FastAPI.md)
 - [Django Integration](docs/Django.md)
 - [Strawberry Integration](docs/Strawberry.md)
 - [Keycloak Admin](docs/Keycloak-Admin.md)
-- [Migration from v0.x](docs/MIGRATION_v1.md)
+- [Migration v1](docs/MIGRATION_v1.md) · [Migration v2](docs/MIGRATION_v2.md)

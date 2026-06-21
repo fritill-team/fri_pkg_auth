@@ -2,8 +2,10 @@
 
 > **v1.0 note:** `--strict-roles` is now optional. When the authorization module (`pkg_auth.authorization`) is in use, per-organization role enforcement is handled by the ACL database rather than by Keycloak client roles. Services that derive authorization from `AuthContext` should omit `--strict-roles`. The Keycloak admin client remains useful for **user provisioning** (creating service accounts, managing invitation flows) and **service-account setup** (client creation, audience configuration).
 
+> This is the **canonical** Keycloak admin documentation for pkg_auth.
+
 This document explains how to use the **Keycloak admin helper** that lives inside the
-`pkg_auth.keycloak_admin` package:
+`pkg_auth.admin` package:
 
 - As a **CLI command** (for Kubernetes initContainers, local scripts, etc.).
 - Programmatically **from within your application**.
@@ -90,23 +92,21 @@ you can expose a console script via `pyproject.toml`:
 
 ```toml
 [project.scripts]
-keycloak-admin = "pkg_auth.keycloak_admin.__main__:main"
+keycloak-init-client = "pkg_auth.admin.cli:main"
 ```
 
-After installing the package (e.g. `pip install .` or from GitHub), you get
-a `keycloak-admin` command on your PATH.
+After installing the package (e.g. `pip install pkg-auth`), you get
+a `keycloak-init-client` command on your PATH. The package already declares
+this entry point, so no extra wiring is needed in consuming services.
 
-Alternatively, you can always run the module directly:
-
-```bash
-python -m pkg_auth.keycloak_admin
-```
+> There is no `pkg_auth/admin/__main__.py`, so `python -m pkg_auth.admin`
+> does **not** work — always invoke the `keycloak-init-client` console script.
 
 ---
 
 ## 4. CLI usage
 
-The CLI entrypoint lives in `pkg_auth.keycloak_admin.__main__`.
+The CLI entrypoint lives in `pkg_auth.admin.cli` (`main`).
 
 ### Basic usage
 
@@ -117,13 +117,7 @@ KEYCLOAK_ADMIN_USER="admin" \
 KEYCLOAK_ADMIN_PASS="secret" \
 APP_NAME="articles" \
 KEYCLOAK_FRONTEND_CLIENT_IDS="frontend-admin,frontend-student" \
-keycloak-admin --strict-roles --strict-audience
-```
-
-or, without the console script:
-
-```bash
-python -m pkg_auth.keycloak_admin --strict-roles --strict-audience
+keycloak-init-client --strict-roles --strict-audience
 ```
 
 ### CLI options
@@ -213,7 +207,7 @@ If you are happy to configure everything via environment variables, import
 the convenience function:
 
 ```python
-from pkg_auth.keycloak_admin.env import ensure_keycloak_client_from_env
+from pkg_auth.admin.env import ensure_keycloak_client_from_env
 
 result = ensure_keycloak_client_from_env(
     strict_roles=True,
@@ -240,8 +234,8 @@ You might run this in:
 If you want to construct settings programmatically instead of env vars:
 
 ```python
-from pkg_auth.keycloak_admin.settings import KCAdminSettings
-from pkg_auth.keycloak_admin.helpers import provision_keycloak_client
+from pkg_auth.admin.settings import KCAdminSettings
+from pkg_auth.admin import provision_keycloak_client
 
 settings = KCAdminSettings(
     keycloak_base_url="https://auth.example.com",
@@ -274,7 +268,7 @@ system your app uses.
 ## 6. Where this fits in clean architecture
 
 - **`KCAdminSettings`**, **`KeycloakAdminClient`**, and **`provision_keycloak_client`**
-  live in a separate `pkg_auth.keycloak_admin` package, so they do **not**
+  live in a separate `pkg_auth.admin` package, so they do **not**
   pollute your domain model.
 
 - Your app’s domain layer does **not** depend on this admin tooling. It’s

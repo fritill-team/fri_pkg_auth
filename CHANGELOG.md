@@ -3,6 +3,66 @@
 All notable changes to `pkg-auth` are documented here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [3.0.0] — 2026-06-21
+
+### Added
+
+- First-class **service registry**: `Service` and `OrganizationService` domain
+  entities, with `ServiceRepository` and `OrganizationServiceRepository` ports
+  (SQLAlchemy, Django, and fake implementations).
+- **Default-deny service guard** in `ResolveAuthContextUseCase`
+  (`membership_repo`, `org_service_repo=None`, `catalog_repo=None`,
+  `platform_org_id=None`): a resolved permission is dropped unless its owning
+  service is enabled for the org in `organization_services`. The platform org
+  bypasses the guard; leaving `org_service_repo`/`catalog_repo` unset disables
+  filtering (incremental rollout).
+- `ProvisionDefaultServicesUseCase` — enables `auto_provision` services for a
+  new organization.
+- `SetOrganizationServiceUseCase` — platform-admin toggle that raises
+  `ServiceNotSaaSAvailable` when enabling a service the vendor hasn't marked
+  `saas_available` (and `UnknownService` for an unknown service).
+- `SyncServiceCatalogUseCase` + `ServiceSpec` and the `pkg-auth-sync-services`
+  console script for syncing the vendor service registry at deploy time.
+- `CachedOrganizationServiceRepository` — caches the per-org enabled-service-name
+  set (`org_services:{org_id}`) for the service-guard hot path; invalidated on
+  enable/disable/bulk_enable.
+- New exceptions: `PermissionVisibilityConflict`, `UnknownService`,
+  `ServiceNotSaaSAvailable`, `ServiceNotEnabled`.
+- Role cross-visibility validation: `CreateRoleUseCase` / `UpdateRoleUseCase`
+  accept an optional `platform_org_id` and raise `PermissionVisibilityConflict`
+  when assigning `platform_only` perms to a normal-org role (or `tenant_only`
+  perms to a platform-org role).
+- `RegisterPermissionCatalogUseCase` / `SyncPermissionCatalogUseCase` accept an
+  optional `service_repo`.
+
+### Changed
+
+- Permission **visibility** replaces `is_platform`: `visibility:
+  PermissionVisibility` is one of `platform_only` / `shared` (default) /
+  `tenant_only`.
+- `PermissionScope` gains `'tenant'`: `Literal['org', 'tenant', 'platform',
+  'all']`. `platform` → `platform_only ∪ shared`; `tenant`/`org` → `shared ∪
+  tenant_only`.
+- `Permission.description` is now `LocalizedText` (JSONB `{locale: text}`). The
+  default/fallback locale comes from `ACL_DEFAULT_LOCALE` via
+  `pkg_auth.authorization.config.default_locale()`. Use `CatalogEntry.make` to
+  build entries with localized descriptions.
+- Distribution name remains `pkg-auth`; the repository moved to
+  `fritill-team/fri_pkg_auth` and the package is now published on PyPI.
+
+### Removed
+
+- `Permission.is_platform` (and `CatalogEntry`'s `is_platform`) — removed with no
+  alias. Catalogs must switch to `visibility=`.
+
+### Migrations
+
+- `pkg_auth_acl_0003` — add `permissions.visibility`, backfill
+  `is_platform=true → 'platform_only'` else `'shared'`, drop `is_platform`.
+- `pkg_auth_acl_0004` — `permissions.description` `TEXT → JSONB`, backfilling
+  text to `{ '<ACL_DEFAULT_LOCALE>': <text> }`.
+- `pkg_auth_acl_0005` — create the `services` and `organization_services` tables.
+
 ## [2.1.0] — 2026-04-20
 
 ### Added

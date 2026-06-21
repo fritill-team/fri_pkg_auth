@@ -1,6 +1,6 @@
-# itqadem_courses_app — pkg_auth v1.0 reference example
+# itqadem_courses_app — pkg_auth v3.0.0 reference example
 
-A minimal FastAPI service demonstrating the full v1.0 wiring of `pkg_auth`:
+A minimal FastAPI service demonstrating the full v3.0.0 wiring of `pkg_auth`:
 
 - `pkg_auth.authentication` (Keycloak JWT validation → `IdentityContext`)
 - `pkg_auth.authorization` (per-(user, org) ACL with permission catalog)
@@ -45,9 +45,9 @@ itqadem_courses_app/
 
 ## What this example proves end-to-end
 
-1. The service registers its perm catalog on boot (`PublishCatalogUseCase`).
+1. The service registers its perm catalog on boot (`RegisterPermissionCatalogUseCase`).
 2. A request arrives → `Authentication.get_identity` validates the Keycloak JWT.
-3. `make_get_auth_context` lazily upserts the local user row, resolves the org by `X-Organization-Id`, and loads the user's `AuthContext` for that org via the cached membership repo.
+3. `make_get_auth_context` resolves the local user (Mode A upserts the row via `SyncUserFromJwtUseCase`; Mode B reads it via `ResolveUserFromJwtUseCase`), resolves the org by `X-Organization-Id`, and loads the user's `AuthContext` for that org via the cached membership repo.
 4. `require_permission("course:edit")` enforces the perm via `Depends`.
 5. Subsequent requests for the same `(user, org)` hit the in-memory cache (30-second TTL by default).
 

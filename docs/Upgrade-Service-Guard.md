@@ -1,6 +1,9 @@
 # Upgrade guide — service guard, permission visibility, localized descriptions
 
-This release adds four capabilities to `pkg_auth.authorization`:
+This documents the **3.0.0** release — a **breaking** change to
+`pkg_auth.authorization`.
+
+This release adds five capabilities to `pkg_auth.authorization`:
 
 1. **Permission visibility (tri-state)** — `is_platform: bool` is **replaced**
    by `visibility: PermissionVisibility` with `platform_only` / `shared` /
